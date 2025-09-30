@@ -14,7 +14,7 @@ app = FastAPI(
 # Enable CORS (allow frontend apps to access the API)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your frontend domain(s)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,11 +58,15 @@ def root():
 def get_summary():
     """
     Returns aggregated outbreak summary in dashboard-ready JSON format.
-    Includes KPIs, demographics, and LGA breakdown.
+    Includes KPIs, demographics, LGA breakdown, and year of last update.
     """
     try:
         df = load_and_validate_data()
         df = df.copy()
+
+        # --- Convert Last_Update to datetime and extract Year ---
+        df['Last_Update'] = pd.to_datetime(df['Last_Update'], errors='coerce')
+        df['Year'] = df['Last_Update'].dt.year
 
         # --- Age Grouping ---
         def get_age_group(age):
@@ -121,12 +125,13 @@ def get_summary():
         age_breakdown = build_breakdown(df['AgeGroup'], total_cases)
         gender_breakdown = build_breakdown(df['Gender'], total_cases)
 
-        # --- LGA Breakdown ---
+        # --- LGA Breakdown (with Year) ---
         lga_agg = df.groupby(['LGA', 'State'], dropna=False).agg(
             cases=('Patient_ID', 'count'),
             deaths=('Outcome', lambda x: (x == 'Died').sum()),
             recoveries=('Outcome', lambda x: (x == 'Recovered').sum()),
-            last_update=('Last_Update', 'max')
+            last_update=('Last_Update', 'max'),
+            year=('Year', 'max')  # ← Extract latest year per LGA
         ).reset_index()
 
         lga_summary = []
@@ -139,7 +144,8 @@ def get_summary():
                 "cases": int(cases),
                 "deaths": int(row['deaths']),
                 "recovery_rate_percent": int(recovery_pct),
-                "last_update": str(row['last_update']) if pd.notna(row['last_update']) else None
+                "last_update": str(row['last_update']) if pd.notna(row['last_update']) else None,
+                "year": int(row['year']) if pd.notna(row['year']) else None  # ← Include year
             })
 
         # --- Final JSON Response ---

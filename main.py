@@ -101,7 +101,7 @@ def get_summary():
         confirmed = df[df['Case_Status'] == 'Confirmed']
         confirmed_cases = len(confirmed)
 
-        # ✅ CORRECTED: Use "Deceased" and "Discharged"
+        # CORRECTED: Use "Deceased" and "Discharged"
         deaths = confirmed[confirmed['Outcome'] == 'Deceased'].shape[0]
         recoveries = confirmed[confirmed['Outcome'] == 'Discharged'].shape[0]
 
@@ -174,3 +174,4 @@ def get_summary():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Aggregation failed: {str(e)}")
+

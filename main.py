@@ -11,7 +11,7 @@ app = FastAPI(
     version="1.0"
 )
 
-# Enable CORS (allow frontend apps to access the API)
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,7 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Data file path (can be overridden via environment variable)
+# Data file path
 DATA_FILE = os.getenv("DATA_FILE", "extended_patient_outbreak_dataset_5000.csv")
 
 
@@ -47,7 +47,6 @@ def load_and_validate_data() -> pd.DataFrame:
 
 @app.get("/")
 def root():
-    """Root endpoint."""
     return {
         "message": "Lassa Fever Dashboard API is live!",
         "endpoints": ["/summary"]
@@ -58,7 +57,7 @@ def root():
 def get_summary():
     """
     Returns aggregated outbreak summary in dashboard-ready JSON format.
-    Includes KPIs, demographics, LGA breakdown, and year of last update.
+    Includes KPIs, demographics, LGA breakdown, year, and correct outcome mapping.
     """
     try:
         df = load_and_validate_data()
@@ -97,12 +96,14 @@ def get_summary():
             .fillna("Other/Unknown")
         )
 
-        # --- Core Metrics ---
+        # --- Core Metrics (FIXED: Use actual outcome labels) ---
         total_cases = len(df)
         confirmed = df[df['Case_Status'] == 'Confirmed']
         confirmed_cases = len(confirmed)
-        recoveries = confirmed[confirmed['Outcome'] == 'Recovered'].shape[0]
-        deaths = confirmed[confirmed['Outcome'] == 'Died'].shape[0]
+
+        # ✅ CORRECTED: Use "Deceased" and "Discharged"
+        deaths = confirmed[confirmed['Outcome'] == 'Deceased'].shape[0]
+        recoveries = confirmed[confirmed['Outcome'] == 'Discharged'].shape[0]
 
         fatality_rate = round(deaths / confirmed_cases * 100, 1) if confirmed_cases > 0 else 0.0
         recovery_rate = round(recoveries / confirmed_cases * 100, 1) if confirmed_cases > 0 else 0.0
@@ -110,7 +111,7 @@ def get_summary():
         states_affected = df['State'].nunique()
         lgas_affected = df['LGA'].nunique()
 
-        # --- Helper: Build breakdowns ---
+        # --- Demographics Breakdown ---
         def build_breakdown(series, total):
             counts = series.value_counts()
             return [
@@ -128,10 +129,10 @@ def get_summary():
         # --- LGA Breakdown (with Year) ---
         lga_agg = df.groupby(['LGA', 'State'], dropna=False).agg(
             cases=('Patient_ID', 'count'),
-            deaths=('Outcome', lambda x: (x == 'Died').sum()),
-            recoveries=('Outcome', lambda x: (x == 'Recovered').sum()),
+            deaths=('Outcome', lambda x: (x == 'Deceased').sum()),
+            recoveries=('Outcome', lambda x: (x == 'Discharged').sum()),
             last_update=('Last_Update', 'max'),
-            year=('Year', 'max')  # ← Extract latest year per LGA
+            year=('Year', 'max')
         ).reset_index()
 
         lga_summary = []
@@ -145,7 +146,7 @@ def get_summary():
                 "deaths": int(row['deaths']),
                 "recovery_rate_percent": int(recovery_pct),
                 "last_update": str(row['last_update']) if pd.notna(row['last_update']) else None,
-                "year": int(row['year']) if pd.notna(row['year']) else None  # ← Include year
+                "year": int(row['year']) if pd.notna(row['year']) else None
             })
 
         # --- Final JSON Response ---

@@ -21,7 +21,7 @@ app.add_middleware(
 )
 
 # Data file path
-DATA_FILE = os.getenv("DATA_FILE", "extended_patient_outbreak_dataset_5000.csv")
+DATA_FILE = os.getenv("DATA_FILE", "eextended_patient_outbreak_dataset_5000_diverse.csv")
 
 
 def load_and_validate_data() -> pd.DataFrame:
@@ -174,4 +174,5 @@ def get_summary():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Aggregation failed: {str(e)}")
+
 

@@ -57,15 +57,17 @@ def root():
 def get_summary():
     """
     Returns aggregated outbreak summary in dashboard-ready JSON format.
-    Includes KPIs, demographics, LGA breakdown, year, and correct outcome mapping.
+    Includes KPIs, demographics, LGA breakdown, and WEEKLY trends.
     """
     try:
         df = load_and_validate_data()
         df = df.copy()
 
-        # --- Convert Last_Update to datetime and extract Year ---
+        # --- Convert Last_Update to datetime and extract Year & ISO Week ---
         df['Last_Update'] = pd.to_datetime(df['Last_Update'], errors='coerce')
         df['Year'] = df['Last_Update'].dt.year
+        df['Week'] = df['Last_Update'].dt.isocalendar().week  # ISO week (1-53)
+        df['YearWeek'] = df['Year'].astype(str) + '-W' + df['Week'].astype(str).str.zfill(2)
 
         # --- Age Grouping ---
         def get_age_group(age):
@@ -96,12 +98,11 @@ def get_summary():
             .fillna("Other/Unknown")
         )
 
-        # --- Core Metrics (FIXED: Use actual outcome labels) ---
+        # --- Core Metrics ---
         total_cases = len(df)
         confirmed = df[df['Case_Status'] == 'Confirmed']
         confirmed_cases = len(confirmed)
 
-        # CORRECTED: Use "Deceased" and "Discharged"
         deaths = confirmed[confirmed['Outcome'] == 'Deceased'].shape[0]
         recoveries = confirmed[confirmed['Outcome'] == 'Discharged'].shape[0]
 
@@ -149,6 +150,27 @@ def get_summary():
                 "year": int(row['year']) if pd.notna(row['year']) else None
             })
 
+        # --- WEEKLY TREND AGGREGATION (NEW) ---
+        weekly_trend = df.groupby('YearWeek').agg(
+            total_cases=('Patient_ID', 'count'),
+            confirmed_cases=('Case_Status', lambda x: (x == 'Confirmed').sum()),
+            deaths=('Outcome', lambda x: (x == 'Deceased').sum()),
+            recoveries=('Outcome', lambda x: (x == 'Discharged').sum())
+        ).reset_index()
+
+        # Sort by YearWeek (format YYYY-Www ensures correct order)
+        weekly_trend = weekly_trend.sort_values('YearWeek').reset_index(drop=True)
+
+        weekly_summary = []
+        for _, row in weekly_trend.iterrows():
+            weekly_summary.append({
+                "year_week": row['YearWeek'],
+                "total_cases": int(row['total_cases']),
+                "confirmed_cases": int(row['confirmed_cases']),
+                "deaths": int(row['deaths']),
+                "recoveries": int(row['recoveries'])
+            })
+
         # --- Final JSON Response ---
         return {
             "metadata": {
@@ -169,11 +191,9 @@ def get_summary():
                 "age_groups": age_breakdown,
                 "gender": gender_breakdown
             },
-            "lga_breakdown": lga_summary
+            "lga_breakdown": lga_summary,
+            "weekly_trend": weekly_summary  #Weekly data for dashboard charts
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Aggregation failed: {str(e)}")
-
-
-

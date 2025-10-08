@@ -1,8 +1,9 @@
 from datetime import datetime
 import os
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+import shutil
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -20,7 +21,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Data file path
+# Data file path (this is where uploaded file will be saved)
 DATA_FILE = os.getenv("DATA_FILE", "extended_patient_outbreak_dataset_5000_diverse.csv")
 
 
@@ -49,8 +50,53 @@ def load_and_validate_data() -> pd.DataFrame:
 def root():
     return {
         "message": "Lassa Fever Dashboard API is live!",
-        "endpoints": ["/summary"]
+        "endpoints": ["/summary", "/upload"]
     }
+
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """
+    Upload a new CSV dataset to replace the current one.
+    The file must contain the required columns.
+    """
+    # Ensure the file is a CSV
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only CSV files are allowed.")
+
+    try:
+        # Save uploaded file temporarily to validate
+        temp_path = "temp_uploaded.csv"
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Validate the CSV structure
+        df = pd.read_csv(temp_path)
+        required_columns = {
+            'Patient_ID', 'Age', 'Sex', 'Outcome', 'State', 'LGA',
+            'Case_Status', 'Last_Update'
+        }
+        missing = required_columns - set(df.columns)
+        if missing:
+            os.remove(temp_path)
+            raise HTTPException(status_code=400, detail=f"Missing required columns: {missing}")
+
+        # If valid, move to permanent location
+        shutil.move(temp_path, DATA_FILE)
+
+        return {
+            "message": "File uploaded and validated successfully.",
+            "filename": file.filename,
+            "data_file": DATA_FILE,
+            "total_records": len(df)
+        }
+
+    except pd.errors.EmptyDataError:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    except Exception as e:
+        if os.path.exists("temp_uploaded.csv"):
+            os.remove("temp_uploaded.csv")
+        raise HTTPException(status_code=400, detail=f"Invalid CSV file: {str(e)}")
 
 
 @app.get("/summary")
@@ -150,7 +196,7 @@ def get_summary():
                 "year": int(row['year']) if pd.notna(row['year']) else None
             })
 
-        # --- WEEKLY TREND AGGREGATION (NEW) ---
+        # --- WEEKLY TREND AGGREGATION ---
         weekly_trend = df.groupby('YearWeek').agg(
             total_cases=('Patient_ID', 'count'),
             confirmed_cases=('Case_Status', lambda x: (x == 'Confirmed').sum()),
@@ -158,7 +204,6 @@ def get_summary():
             recoveries=('Outcome', lambda x: (x == 'Discharged').sum())
         ).reset_index()
 
-        # Sort by YearWeek (format YYYY-Www ensures correct order)
         weekly_trend = weekly_trend.sort_values('YearWeek').reset_index(drop=True)
 
         weekly_summary = []
@@ -171,7 +216,6 @@ def get_summary():
                 "recoveries": int(row['recoveries'])
             })
 
-        # --- Final JSON Response ---
         return {
             "metadata": {
                 "generated_at": datetime.utcnow().isoformat() + "Z",
@@ -192,7 +236,7 @@ def get_summary():
                 "gender": gender_breakdown
             },
             "lga_breakdown": lga_summary,
-            "weekly_trend": weekly_summary  #Weekly data for dashboard charts
+            "weekly_trend": weekly_summary
         }
 
     except Exception as e:
